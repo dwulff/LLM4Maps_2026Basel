@@ -1,5 +1,8 @@
-# LLM4Maps_2026Basel
+# LLM4Maps, Basel 2026
 
+This is the home of the LLM4Maps workshop at the University of Basel. 
+
+Workshop held by [Dirk Wulff](https://www.mpib-berlin.mpg.de/person/dirk-wulff/419312). Contributions to materials by [Anna Thoma](https://www.mpib-berlin.mpg.de/person/anna-thoma/171978) and [Zak Hussain](https://github.com/Zak-Hussain). 
 
 ## Schedule
 
