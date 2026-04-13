@@ -18,3 +18,8 @@ Workshop held by [Dirk Wulff](https://www.mpib-berlin.mpg.de/person/dirk-wulff/4
 11:00 - 11:30 Break<br>
 11:30 - 12:15 Presentations<br>
 12:15 - 13:00 Next steps<br>
+
+## References
+
+[Thoma, A., Bolenz, F., Tiede, K., Yang, Y., Palminteri, S., Hertwig, R., & Wulff, D. (2025). Mapping the landscape of behavioral reinforcement learning research. OSF](https://osf.io/preprints/psyarxiv/6c2va)
+[Hussain, Z., Binz, M., Mata, R., & Wulff, D. U. (2024). A tutorial on open-source large language models for behavioral science. Behavior Research Methods, 56(8), 8214-8237.](https://link.springer.com/article/10.3758/s13428-024-02455-8)
