@@ -7,10 +7,11 @@ Workshop held by [Dirk Wulff](https://www.mpib-berlin.mpg.de/person/dirk-wulff/4
 ## Schedule
 
 14:00 - 14:30 Intro & Welcome<br>
-14:30 - 15:30 Intro to Maps<br>
-15:30 - 16:00 Break<br>
-16:00 - 17:00 Exercise<br>
-17:00 - 18:00 Embeddings & Walkthrough<br>
+14:30 - 15:00 Installations
+15:00 - 16:00 Intro to Maps<br>
+16:00 - 16:30 Break<br>
+16:30 - 17:30 Exercise<br>
+17:30 - 18:00 Embeddings & Walkthrough<br>
 <br>
 09:00 - 09:30 Recap<br>
 09:30 - 10:00 Get data<br>
