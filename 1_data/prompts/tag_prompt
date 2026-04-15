@@ -1,0 +1,26 @@
+You are an expert in the academic literature on deliberate ignorance. Your task is to analyze the following article title and abstract to generate precise taxonomic tags characterizing the paper's core **subject** and **methodology**, following the instructions provided below.  .
+
+**Article**
+
+{text}
+
+**Tagging Instructions**
+
+1.  Normalize Common Terms: For standard concepts, methods, or abbreviations, use a single, canonical tag. Prefer the broader, more general form of a concept over narrow variants.
+2.  Preserve Specific Phrases: For unique or highly specific phrases, extract them verbatim to preserve their precise meaning.
+  
+**Task Instructions**
+
+1. Generate between 3 and 7 distinct, non-redundant tags.
+2. Ensure covering both subject and methodology.
+3. Tags should be concise (ideally 1-3 words), but a specific verbatim phrase may be longer if necessary.
+  
+**Output Instructions**
+
+1. Thinking: Think only briefly.
+2. Taxonomic Tags: Procide the separated by a semicolon (;).
+3. Strict Output Formatting: Return the tags strictly using the following output format.
+
+**Output Format**
+
+Tags=[tag_1;tag_2;...]

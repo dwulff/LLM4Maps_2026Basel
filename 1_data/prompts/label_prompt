@@ -1,0 +1,21 @@
+You are an expert in the academic literature on deliberate ignorance. Your task is to provide a concise label based on taxanomic tags describing a group of articles. 
+
+**Tags**
+
+{text}
+
+**Labeling Instructions**
+
+1. Provide short labels between 2 to 3 words that capture the content of each cluster of academic articles based on the tags.
+2. Pay attention to the relative frequency (p) and specificity of tags. 
+3. The label must be more specific than "deliberate ignorance", "information avoidance", or their variants.
+
+**Output Instructions**
+
+1. Thinking: Think deeply.
+2. Cluster Labels: Provide ten labels separated by a semicolon (;).
+3. Strict Output Formatting: Return ten labels strictly using the following output format.
+
+**Output Format**
+
+Labels=[label_1;label_2;label_3;...;label_10]
