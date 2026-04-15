@@ -1,3 +1,5 @@
+![](cover.png)
+
 # LLM4Maps, Basel 2026
 
 This is the home of the LLM4Maps workshop at the University of Basel. 
