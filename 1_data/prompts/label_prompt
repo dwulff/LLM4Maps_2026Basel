@@ -13,9 +13,9 @@ You are an expert in the academic literature on deliberate ignorance. Your task 
 **Output Instructions**
 
 1. Thinking: Think deeply.
-2. Cluster Labels: Provide ten labels separated by a semicolon (;).
-3. Strict Output Formatting: Return ten labels strictly using the following output format.
+2. Cluster Labels: Provide seven labels separated by a semicolon (;).
+3. Strict Output Formatting: Return seven labels strictly using the following output format.
 
 **Output Format**
 
-Labels=[label_1;label_2;label_3;...;label_10]
+Labels=[label_1;label_2;label_3;...;label_7]

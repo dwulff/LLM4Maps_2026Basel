@@ -1,0 +1,345 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Mapping the research landscape of deliberate ignorance
+
+In this notebook we will explore how to map a research landscape using a combination of bibliometric data, semantic embeddings, and clustering methods. Our goal is to reproduce, at a smaller scale, the approach introduced by [Thoma et al. (2025)](https://osf.io/kxz9s/) by mapping the landscape of behavioral reinforcement learning research. We will apply this approach to the field of **deliberate ignorance**—the active decision not to seek or use available information, following up on Ralph Hertwig's Bernoulli Lecture. We will make use of a [Scopus](https://www.scopus.com/) export of articles containing bibliographic metadata, including:
+
+1. `"Title"`: The title of the article.
+2. `"Abstract"`: The abstract of the article.
+3. `"Author(s) ID"`: Semicolon-separated Scopus author identifiers.
+4. `"References"`: The cited references of the article.
+5. `"Document Type"`: The type of document (e.g., `"Article"`, `"Conference paper"`).
+
+By the end of this notebook, you will be able to:
+- Clean and filter the database of articles.
+- Construct author, reference, and semantic similarity spaces from bibliographic data.
+- Combine multiple similarity spaces into a single research landscape using dimensionality reduction.
+- Cluster articles into research groups and visualize the resulting map.
+- Use a local LLM to extract and consolidate research tags from article titles and abstracts.
+- Generate cluster labels and visualize the distribution of research topics across the landscape.
+
+## Environment setup
+
+The code relies on a helper file `_helpers.R` that installs and loads all required R packages, sets up a Python-based sentence transformer model via `reticulate`, and defines several utility functions. The helper file also defines a `text_gen()` function that sends prompts to a local LLM served via [Ollama](https://ollama.com/). Make sure that Ollama is running and that the model `gemma4:e2b` has been pulled before proceeding.
+
+```{r}
+source("_helpers.R")
+```
+
+The helper file provides the following utility functions that we will use throughout this notebook:
+
+- `cosine(m)`: Computes the cosine similarity matrix for the rows of a matrix `m`.
+- `normalize(m)`: L2-normalizes the rows of a matrix `m`.
+- `ppmi(m)`: Computes positive pointwise mutual information for a co-occurrence matrix.
+- `text_gen(prompt, len, model, think)`: Sends a prompt to a local Ollama model and returns the generated text.
+
+It also loads a sentence transformer model (`Qwen/Qwen3-Embedding-0.6B`) via `reticulate`, stored in the object `qwen`, which we will use later to compute semantic embeddings.
+
+## Loading and cleaning the data
+
+We begin by loading the dataset as a `tibble`:
+
+```{r}
+ignor = read_csv("1_data/deliberate_ignorance.csv")
+```
+
+The raw export from Scopus contains entries with missing metadata and document types that are not relevant for our analysis (e.g., editorials, book chapters). The code below removes articles that lack author IDs, references, titles, or abstracts (including those marked `"[No abstract available]"`), and retains only entries of type `"Article"` or `"Conference paper"`:
+
+```{r}
+exclude = is.na(ignor$`Author(s) ID`) | 
+         is.na(ignor$References) |
+         is.na(ignor$Title) | 
+         is.na(ignor$Abstract) | ignor$Abstract == "[No abstract available]"
+include = ignor$`Document Type` %in% c("Article", "Conference paper")
+ignor = ignor |> filter(!exclude, include)
+```
+
+Abstracts in Scopus exports often contain artifacts from editorial or publishing practices, such as copyright notices, section headers (e.g., `"Method:"`, `"Background:"`), and bracketed text (e.g., `"[Background]"`). These artifacts can inflate semantic similarity between unrelated articles. The code below uses regular expressions to remove them and collapses any resulting excess whitespace:
+
+```{r}
+regex = c("Copyright[:print:]+$", "©[:print:]+$", 
+          "\\b[A-Z][a-z]+\\b\\:", "\\[(.*?)\\]")
+for(reg in regex) ignor$Abstract = ignor$Abstract |> str_remove(reg) |> str_squish()
+```
+
+## Constructing the similarity spaces
+
+A key step in mapping a research landscape is to evaluate the similarity between articles. Following [Thoma et al. (2025)](https://osf.io/kxz9s/), we construct three separate similarity spaces—based on authors, references, and semantic content—and later combine them into a single aggregate space. Each space captures a different dimension of relatedness: shared authorship reflects collaborative networks, shared references reflect overlapping knowledge bases, and semantic similarity reflects thematic overlap.
+
+### Author space
+
+The author space encodes the similarity of articles based on shared authorship. We begin by extracting the author IDs from the semicolon-separated strings and tabulating their frequencies. Authors who appear only once in the database are removed, as they do not contribute to the co-occurrence structure:
+
+```{r}
+authors = str_split(ignor$`Author(s) ID` |> str_remove_all("[:blank:]"), ";")
+author_tab = authors |> unlist() |> table()
+author_tab = author_tab[author_tab > 2]
+```
+
+Next, we construct an article-by-author binary matrix, where each cell indicates whether a given author contributed to a given article. This matrix is then reduced to 30 dimensions using truncated singular value decomposition (SVD) via `svds()`. The result is a compact embedding where articles with overlapping author sets are placed closer together:
+
+```{r}
+author_mat = matrix(0, nrow = nrow(ignor), ncol = length(author_tab), 
+                    dimnames = list(ignor$Title, names(author_tab)))
+for(i in 1:nrow(ignor)) {
+  authors_i = authors[[i]][authors[[i]] %in% names(author_tab)] 
+  author_mat[i, authors_i] = 1
+}
+
+svd = svds(author_mat, k = 30)
+author_emb = svd$u %*% diag(svd$d)
+```
+
+### Reference space
+
+The reference space is constructed in the same way, but based on shared cited references rather than shared authors. We begin by splitting the reference strings at the delimiter `");"`—each reference entry in Scopus typically ends with a closing parenthesis—and tabulating reference frequencies. References cited only once are removed:
+
+```{r}
+references = str_split(ignor$References |> str_replace_all("\\);", ")@@"), "@@ ")
+reference_tab = references |> unlist() |> table()
+reference_tab = reference_tab[reference_tab > 4]
+```
+
+As before, we construct an article-by-reference binary matrix and reduce it to 30 dimensions using truncated SVD:
+
+```{r}
+reference_mat = matrix(0, nrow = nrow(ignor), ncol = length(reference_tab), 
+                       dimnames = list(ignor$Title, names(reference_tab)))
+for(i in 1:nrow(ignor)) {
+  references_i = references[[i]][references[[i]] %in% names(reference_tab)] 
+  reference_mat[i, references_i] = 1
+}
+
+svd = RSpectra::svds(reference_mat, k = 30)
+reference_emb = svd$u %*% diag(svd$d)
+```
+
+### Semantic space
+
+The semantic space captures the thematic content of articles based on their titles and abstracts. We use the sentence transformer model `Qwen/Qwen3-Embedding-0.6B`, loaded earlier via `reticulate`, to encode the concatenation of each article's title and abstract into a dense embedding vector. Unlike the author and reference spaces, this space does not rely on co-occurrence frequencies but instead leverages the model's understanding of language to place semantically related articles close together (if this breaks or takes too long, see the next chunk):
+
+```{r}
+texts = paste0("Title: ", ignor$Title, ".\nAbstract: ", ignor$Abstract)
+semantic_emb = qwen$encode(texts, show_progress_bar = TRUE)
+```
+
+Since computing the embeddings can take a moment, you can also load a pre-computed file:
+
+```{r}
+semantic_emb = readRDS("1_data/intermediate/semantic_emb.RDS")
+```
+
+### Combining the spaces
+
+Before combining the three spaces, we L2-normalize each embedding matrix so that all three contribute equally to the aggregate similarity. This prevents spaces with larger magnitudes from dominating the combined representation:
+
+```{r}
+author_emb_norm = normalize(author_emb)
+reference_emb_norm = normalize(reference_emb)
+semantic_emb_norm = normalize(semantic_emb)
+```
+
+The three normalized embedding matrices are then concatenated column-wise into a single combined embedding matrix. Finally, we compute the cosine similarity matrix over the combined space, which encodes the aggregate similarity between all pairs of articles:
+
+```{r}
+combined_emb = author_emb_norm |> 
+  cbind(reference_emb_norm) |> 
+  cbind(semantic_emb_norm)
+
+combined_net = cosine(combined_emb)
+rownames(combined_net) = colnames(combined_net) = ignor$Title
+```
+
+## Mapping the landscape
+
+To visualize the research landscape, we project the high-dimensional combined embedding into two dimensions using [UMAP](https://arxiv.org/abs/1802.03426) (Uniform Manifold Approximation and Projection). UMAP is a non-linear dimensionality reduction algorithm that preserves both local and global structure. We configure it to use cosine distance as its metric, set `n_neighbors = 10` to emphasize local structure, and use `min_dist = 0.3` to control how tightly points are packed:
+
+```{r}
+umap.defaults$metric = "cosine"
+umap.defaults$n_neighbors = 10
+umap.defaults$min_dist = .3
+layout = umap(combined_emb, config = umap.defaults)
+```
+
+The two-dimensional coordinates are stored in the data frame, and we apply hierarchical clustering (Ward's method) to the projected layout to identify 10 article clusters. These clusters represent groups of articles that are similar across all three dimensions—authorship, references, and semantic content:
+
+```{r}
+ignor$x = layout$layout[,1]
+ignor$y = layout$layout[,2]
+ignor$cluster = hclust(dist(layout$layout), method = "ward.D2") |> cutree(10)
+```
+
+A quick scatter plot confirms the structure of the landscape, with colors indicating the cluster assignments:
+
+```{r}
+plot(ignor$x, ignor$y, col = ignor$cluster + 1)
+```
+
+## Extracting research tags
+
+To characterize the content of each cluster, we use a local LLM to extract research tags from each article's title and abstract. Following [Thoma et al. (2025)](https://osf.io/kxz9s/), we prompt the model to generate between 3 and 7 concise, non-redundant taxonomic tags that capture the core topics and methods of each article. 
+
+The code loads the tag extraction prompt from a file (located in `1_data/prompts/`) and iterates through each article, passing the concatenation of the title and abstract to the local Ollama model (`gemma4:e2b`). The `think = FALSE` switches off the model's chain-of-thought reasoning in order to save time (if this breaks or takes too long, see the next chunk):
+
+```{r}
+prompt = read_file("1_data/prompts/tag_prompt")
+tags = character(length(prompt))
+for(i in 1:nrow(ignor)){
+  text = paste0("Title: ", ignor$Title[i], 
+                "\nAbstract: ", ignor$Abstract[i])  
+  tags[i] = text_gen(glue(prompt), len = 100, model = "gemma4:e2b", think = FALSE)
+  cat("Article ", i,": ", tags[i], "\n", sep = "")
+}
+```
+
+Since this loop can take considerable time, you can also load pre-computed tags that were gneerated with `think = TRUE`:
+
+```{r}
+tags = readRDS("1_data/intermediate/tags.RDS")
+```
+
+The raw LLM output is cleaned by removing formatting artifacts (`"Tags="`, brackets) and splitting the semicolon-separated tags into a list. Each tag is converted to lowercase for consistency:
+
+```{r}
+ignor$tags = str_remove_all(tags, "Tags=|\\[|\\]") |> str_replace_all("; ",";") |> 
+  str_split(";") |> lapply(str_to_lower)
+```
+
+### Consolidating tags
+
+LLM-generated tags often contain semantic variations of the same concept (e.g., `"fMRI"` vs. `"functional MRI"`, or `"information avoidance"` vs. `"information seeking avoidance"`). To address this, we embed all unique tags using the same sentence transformer model and cluster them based on cosine similarity. Tags within the same cluster are mapped to a single label—the most frequently occurring tag in that cluster:
+
+```{r}
+tag_tab = ignor$tags |> unlist() |> table()
+tag_emb = qwen$encode(paste0("Research tag of a deliberate ignorance article: ", 
+                              names(tag_tab)), show_progress_bar = TRUE)
+# tag_emb = readRDS("1_data/intermediate/tag_emb.RDS") use if necessary
+tag_cos = cosine(tag_emb)
+
+cl = hclust(as.dist(1 - tag_cos), method = "complete")
+tag_dict = tibble(tag = names(tag_tab), 
+                  n = c(tag_tab),
+                  cl = cutree(cl, min(which(cl$height > .07)))) |> 
+  group_by(cl) |> 
+  mutate(label = tag[which.max(n)]) |> 
+  pull(label, tag)
+
+ignor$tags_clean = lapply(ignor$tags, function(x) tag_dict[x])
+```
+
+## Generating cluster labels
+
+To assign descriptive labels to each of the 10 clusters, we first summarize the most frequent consolidated tags per cluster. The helper function `get_top()` extracts the top 30 tags for each cluster along with their relative frequency:
+
+```{r}
+get_top = function(x){
+  tab = x |> unlist() |> table() |> sort(decreasing = T)
+  paste0(names(tab)[1:30], " (p = ", round(c(tab)[1:30] / sum(tab), 2), ")") |> 
+    paste(collapse="\n")
+}
+top_twenty_tags = split(ignor$tags_clean, ignor$cluster) |> sapply(get_top)
+cat(top_twenty_tags, sep = "\n\n")
+```
+
+The tag summaries are then formatted into a single text block and passed to the local LLM together with a labeling prompt. The model is asked to generate a concise, descriptive label for each cluster based on the distribution of its research tags:
+
+```{r}
+text = paste0("Cluster ", 1:10, ":\n", top_twenty_tags, "\n\n") |> paste(collapse="")
+
+prompt = read_file("1_data/prompts/label_prompt")
+labels = text_gen(glue(prompt), len = 5000, model = "gemma4:e2b", think = TRUE)
+labels = labels |> str_remove_all("Labels=|\\[|\\]") |> str_split(";") |> unlist()
+print(labels)
+```
+
+## Visualizing the landscape
+
+### Research landscape with cluster labels
+
+The code below produces the final landscape map. Each point represents one article, colored by its cluster assignment. Cluster labels generated by the LLM are placed at offset positions near each cluster centroid:
+
+```{r}
+cols = mako(max(ignor$cluster), begin = .1, end = .9)
+
+par(mar = c(0, 0, 0, 0), mfrow = c(1, 1))
+plot.new(); plot.window(xlim = range(ignor$x), ylim = range(ignor$y))
+points(ignor$x, ignor$y, col = cols[ignor$cluster], pch = 16)
+
+c_x = tapply(ignor$x, ignor$cluster, mean)
+c_y = tapply(ignor$y, ignor$cluster, mean)
+pos_x = c_x + c(2, 2, -1.5, 0, -2, 0, -2, .2, 1.7, 0)
+pos_y = c_y + c(1, -1, 0, -2.5, 1.4, -2, 0, 2.5, -1.5, -1.5)
+text(pos_x, pos_y, labels = labels |> str_replace(" ", "\n"), 
+     col = cols, font = 2, cex = 1.2)
+labels
+```
+
+### Distribution of research tags
+
+To examine how research topics are distributed across the landscape, the code below produces a grid of small multiples—one panel per tag. In each panel, articles containing the tag are highlighted in red, while all other articles appear in grey. This visualization reveals whether a tag is localized within a specific region of the landscape or spread broadly across it:
+
+```{r}
+top_tags = (ignor$tags_clean |> unlist() |> table() |> sort(decreasing = T) |> names())[1:40]
+
+par(mfrow = c(5, 8), mar = c(.5, .5, 2, .5))
+for(i in 1:length(top_tags)){
+  present = sapply(ignor$tags_clean, function(x) top_tags[i] %in% x)
+  plot.new(); plot.window(xlim = range(ignor$x), ylim = range(ignor$y))
+  points(ignor |> filter(!present) |> select(x, y), col = "grey75", pch = 16, cex = .3)
+  points(ignor |> filter(present) |> select(x, y), col = "red", pch = 16, cex = .4)
+  mtext(top_tags[i], cex = .5)
+}
+```
+
+### Cluster relatedness
+
+Finally, we can examine the relatedness of clusters across the individual similarity spaces. The helper function `average_by_cluster()` computes the average pairwise similarity between articles in each pair of clusters, yielding a cluster-by-cluster similarity matrix. Inspecting these matrices for the author and semantic spaces reveals where clusters share authors but differ thematically, or vice versa—patterns that can highlight opportunities for scientific exchange:
+
+```{r}
+average_by_cluster = function(m, cl){
+  mat = matrix(nrow = max(cl), ncol = max(cl))
+  for(i in 1:max(cl)){
+    for(j in i:max(cl)){
+      mat[i,j] = mat[j,i] = mean(m[cl == i, cl == j])
+    }
+  }
+  mat
+}
+
+author_net = cosine(author_emb_norm)
+reference_net = cosine(reference_emb_norm)
+semantic_net = cosine(semantic_emb_norm)
+
+author_net_agg = average_by_cluster(author_net, ignor$cluster)
+reference_net_agg = average_by_cluster(reference_net, ignor$cluster)
+semantic_net_agg = average_by_cluster(semantic_net, ignor$cluster)
+
+similarities = expand_grid(i = 1:nrow(author_net_agg), 
+                           j = 1:ncol(author_net_agg)) |> 
+  mutate(author_sim = c(author_net_agg),
+         reference_sim = c(reference_net_agg),
+         semantic_sim = c(semantic_net_agg),
+         id = paste0(i,"_",j)) |> 
+  filter(i<j)
+
+plot(similarities$semantic_sim, similarities$author_sim, type="n")
+text(similarities$semantic_sim, similarities$author_sim, labels = similarities$id)
+
+plot(similarities$reference_sim, similarities$author_sim, type="n")
+text(similarities$reference_sim, similarities$author_sim, labels = similarities$id)
+
+plot(similarities$semantic_sim, similarities$reference_sim, type="n")
+text(similarities$semantic_sim, similarities$reference_sim, labels = similarities$id)
+
+```
+
+**Task 1:** Try varying the number of clusters (e.g., `cutree(, 5)` or `cutree(, 15)`) and observe how the granularity of the landscape changes. How does this affect the interpretability of the cluster labels?
+
+**Task 2:** Try adjusting the UMAP parameters `n_neighbors` and `min_dist` and observe how they affect the layout. What happens when you increase `n_neighbors` to 30? What happens when you decrease `min_dist` to 0.1?
+
+**Task 3:** Try giving more weight to the semantic space by concatenating it multiple times (e.g., `cbind(semantic_emb_norm, semantic_emb_norm)`) before computing the combined embedding. How does this change the landscape?

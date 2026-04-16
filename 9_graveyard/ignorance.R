@@ -93,10 +93,10 @@ for(i in 1:nrow(ignor)){
   cat("Article ", i,": ", tags[i], "\n", sep = "")
   }
 
-saveRDS(tags, "1_data/intermediate/tags.RDS")
+#saveRDS(tags, "1_data/intermediate/tags.RDS")
 tags = readRDS("1_data/intermediate/tags.RDS")
 
-ignor$tags = str_remove_all(tags, "Tags=|\\[|\\]") |> str_split(";") |> 
+ignor$tags = str_remove_all(tags, "Tags=|\\[|\\]") |> str_replace_all("; ", ";") |> str_split(";") |> 
   lapply(str_to_lower)
 
 tag_tab = ignor$tags |> unlist() |> table()
@@ -117,7 +117,7 @@ ignor$tags_clean = lapply(ignor$tags, function(x) tag_dict[x])
 
 get_top = function(x){
   tab = x |> unlist() |> table() |> sort(decreasing = T)
-  paste0(names(tab)[1:30], " (p = ", round(c(tab)[1:30] / sum(tab), 2), ")") |> 
+  paste0(names(tab)[1:10], " (p = ", round(c(tab)[1:10] / sum(tab), 2), ")") |> 
     paste(collapse="\n")
   }
 top_twenty_tags = split(ignor$tags_clean, ignor$cluster) |> sapply(get_top)
@@ -157,8 +157,8 @@ for(i in 1:length(top_tags)){
   present = sapply(ignor$tags_clean, function(x) top_tags[i] %in% x)
   col = ifelse(present, "red", "black")
   plot.new();plot.window(xlim = range(ignor$x), ylim = range(ignor$y))
-  points(ignor |> filter(!present) |> select(x, y), col = "grey75", pch=16, cex=.5)
-  points(ignor |> filter(present) |> select(x, y), col = "red", pch=16, cex=.7)
+  points(ignor |> filter(!present) |> select(x, y), col = "grey75", pch=16, cex=.3)
+  points(ignor |> filter(present) |> select(x, y), col = "red", pch=16, cex=.5)
   mtext(top_tags[i], cex=.5)
   }
 

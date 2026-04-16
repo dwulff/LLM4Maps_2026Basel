@@ -17,9 +17,8 @@ You are an expert in the academic literature on deliberate ignorance. Your task 
   
 **Output Instructions**
 
-1. Thinking: Think only briefly.
-2. Taxonomic Tags: Procide the separated by a semicolon (;).
-3. Strict Output Formatting: Return the tags strictly using the following output format.
+1. Taxonomic Tags: Provide the separated by a semicolon (;).
+2. Strict Output Formatting: Return the tags strictly using the following output format.
 
 **Output Format**
 
